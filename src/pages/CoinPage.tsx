@@ -88,7 +88,7 @@ export default function CoinPage({ mint }: { mint: string }) {
           <div className="badges">
             <span className="badge">{ck} Mint revoked</span>
             <span className="badge">{ck} Freeze revoked</span>
-            <span className="badge">{ck} Pet posts labelled AI</span>
+            <span className="badge">{ck} Gangster posts labelled AI</span>
           </div>
         </div>
       </section>
@@ -104,7 +104,7 @@ export default function CoinPage({ mint }: { mint: string }) {
       <section className="card catcard">
         <PetAvatar id={cat.id} name={cat.name} size={88} />
         <div>
-          <p className="eyebrow mono">This coin's pet</p>
+          <p className="eyebrow mono">This coin's gangster</p>
           <h2>{cat.name}</h2>
           <p className="muted">{cat.breed} · {voiceLabel(cat.voice)} voice</p>
         </div>
@@ -114,12 +114,12 @@ export default function CoinPage({ mint }: { mint: string }) {
 
       <div className="cp-grid">
         <PetChat coin={coin} />
-        <section className="card logcard" aria-label={`${cat.name}'s log`}>
+        <section className="card logcard" aria-label={`${cat.name}'s caper log`}>
           <div className="log-h">
-            <h3>{cat.name}'s log</h3>
-            <span className="muted small">Written by an AI pet</span>
+            <h3>{cat.name}'s caper log</h3>
+            <span className="muted small">Written by a fictional AI character</span>
           </div>
-          {posts.length === 0 ? <p className="muted small">{cat.name} is writing the first entry…</p> : <PostList posts={posts} mode="log" />}
+          {posts.length === 0 ? <p className="muted small">{cat.name} is planning the first caper…</p> : <PostList posts={posts} mode="log" />}
         </section>
       </div>
 
