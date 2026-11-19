@@ -47,6 +47,8 @@ img { max-width: 100%; }
 .nav a { color: var(--muted); text-decoration: none; font: 500 13px var(--font-mono); border-radius: 6px; padding: 7px 14px; }
 .nav a:hover { color: var(--fg); }
 .nav a.on { background: var(--surface-2); color: var(--fg); }
+.ticker { display: flex; align-items: center; gap: 14px; font-size: 13px; font-weight: 600; }
+.tick { display: inline-flex; align-items: center; gap: 6px; }
 .wallet-area { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .bal { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 7px 14px; font-size: 13px; }
 .wallet-adapter-button { font-family: var(--font-body) !important; border-radius: 6px !important; height: 40px !important; }

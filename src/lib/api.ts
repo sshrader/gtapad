@@ -110,3 +110,9 @@ export async function getMarket(mint: string): Promise<Market> {
 export async function getAllMarkets(): Promise<Record<string, Omit<Market, 'history'>>> {
   return json(await fetch('/api/market'));
 }
+
+export type Prices = { btc: { usd: number; ts: number } | null; sol: { usd: number; ts: number } | null };
+
+export async function getPrices(): Promise<Prices> {
+  return json<Prices>(await fetch('/api/prices'));
+}

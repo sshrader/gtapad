@@ -9,6 +9,7 @@ import Launch from './pages/Launch';
 import Wire from './pages/Wire';
 import CoinPage from './pages/CoinPage';
 import Admin from './pages/Admin';
+import PriceTicker from './components/PriceTicker';
 
 function Logo() {
   return <img className="logo" src="/logo.png" width={32} height={32} alt="" />;
@@ -81,6 +82,7 @@ export default function App() {
             {link('launch', 'Launch')}
             {link('wire', 'The Wire')}
           </nav>
+          <PriceTicker />
           <div className="wallet-area">
             {publicKey && balance !== null && <span className="bal mono">{balance.toFixed(3)} SOL</span>}
             {publicKey && CLUSTER === 'devnet' && (

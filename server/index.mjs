@@ -288,6 +288,28 @@ app.get('/api/coins/:mint', async (req, res) => {
   res.json(coin);
 });
 
+// BTC and SOL spot prices for the header. Cached for 30 seconds so visitors never hit the provider directly.
+// If the provider fails, the last good price is kept (and marked with its age) instead of showing nothing.
+let priceCache = { at: 0, btc: null, sol: null };
+async function spot(pair) {
+  const r = await fetch(`https://api.coinbase.com/v2/prices/${pair}/spot`, { signal: AbortSignal.timeout(6000) });
+  if (!r.ok) throw new Error(`price ${r.status}`);
+  const n = Number((await r.json())?.data?.amount);
+  if (!Number.isFinite(n) || n <= 0) throw new Error('bad price');
+  return n;
+}
+app.get('/api/prices', async (_req, res) => {
+  if (Date.now() - priceCache.at > 30_000) {
+    const [btc, sol] = await Promise.allSettled([spot('BTC-USD'), spot('SOL-USD')]);
+    priceCache = {
+      at: Date.now(),
+      btc: btc.status === 'fulfilled' ? { usd: btc.value, ts: Date.now() } : priceCache.btc,
+      sol: sol.status === 'fulfilled' ? { usd: sol.value, ts: Date.now() } : priceCache.sol,
+    };
+  }
+  res.json({ btc: priceCache.btc, sol: priceCache.sol });
+});
+
 // Market cap for every coin (no history), for the Explore page.
 app.get('/api/market', async (_req, res) => {
   const coins = await store.get('coins.json', []);
