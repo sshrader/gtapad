@@ -172,5 +172,6 @@ export function petLook(id: string): PetLook {
     hat: l.hat,
     hatColor: l.hatColor,
     shades: !!l.shades,
+    armed: true,
   };
 }

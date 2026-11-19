@@ -9,6 +9,7 @@ export type PetLook = {
   hat: 'fedora' | 'flat' | 'slick' | 'bun' | 'helmet' | 'beret' | 'cap' | 'bald';
   hatColor: string;
   shades: boolean;
+  armed?: boolean; // carries a toy blaster
 };
 
 export type WorldPet = { mint: string; petId: string; look: PetLook; name: string; symbol: string };
@@ -100,6 +101,11 @@ function paintUp(look: PetLook, frame: 0 | 1 | 2): HTMLCanvasElement {
   rect(11, 7 + a, 2, 3, look.suit);
   px(3, 10 + b, look.skin);
   px(12, 10 + a, look.skin);
+  if (look.armed) {
+    // a bright toy blaster in the right hand: orange body, teal tip, so it never looks like a real weapon
+    rect(12, 5 + a, 2, 4, '#FF8A3D');
+    rect(12, 4 + a, 2, 1, '#35F0E0');
+  }
 
   // jacket with a trim along the shoulders
   round(4, 6, 8, 7, look.suit);
@@ -334,8 +340,11 @@ function buildTerrain(): Terrain {
 
 /* ------------------------------ the world ------------------------------ */
 
+type Kind = 'pet' | 'cop' | 'civ';
+
 type PetState = {
   pet: WorldPet;
+  kind: Kind;
   tx: number;
   ty: number;
   x: number;
@@ -351,7 +360,13 @@ type PetState = {
   phase: number;
   hopY: number;
   hopV: number;
+  stun: number; // seconds left dazed after being tagged
+  cool: number; // seconds until it may fire again
+  chase?: string; // a cop's current target
 };
+
+type Shot = { x: number; y: number; vx: number; vy: number; life: number; col: string; from: string };
+type Fx = { x: number; y: number; t: number; kind: 'pow' | 'spark'; text?: string; col: string };
 
 export type World = {
   night: boolean;
@@ -364,6 +379,20 @@ export type World = {
   hop(mint: string): void;
 };
 
+const POWS = ['POW!', 'ZAP!', 'BLAM!', 'PEW!', 'BOOP!', 'WHAM!'];
+const RANGE = 150; // how far a blaster reaches, in pixels
+const SHOT_SPEED = 150;
+
+// Background cast: harmless cartoon cops and passers-by. All fictional.
+const COP: PetLook = { skin: '#E8B98F', hair: '#222', suit: '#2347A8', accent: '#FFD23F', hat: 'cap', hatColor: '#16296b', shades: true, armed: true };
+const CIVS: PetLook[] = [
+  { skin: '#E8B98F', hair: '#7a4a2a', suit: '#FF9F1C', accent: '#2EC4B6', hat: 'bald', hatColor: '#E8B98F', shades: true },
+  { skin: '#8D5B3E', hair: '#222', suit: '#2EC4B6', accent: '#FF6B6B', hat: 'beret', hatColor: '#FF6B6B', shades: false },
+  { skin: '#F0C7A8', hair: '#E4572E', suit: '#9B5DE5', accent: '#FEE440', hat: 'slick', hatColor: '#E4572E', shades: false },
+  { skin: '#C99774', hair: '#2B2B2B', suit: '#F15BB5', accent: '#00F5D4', hat: 'cap', hatColor: '#00BBF9', shades: true },
+  { skin: '#D9A07A', hair: '#B5B5B5', suit: '#80ED99', accent: '#38A3A5', hat: 'flat', hatColor: '#57CC99', shades: false },
+];
+
 export function createWorld(opts: { hour?: number } = {}): World {
   const hour = opts.hour ?? new Date().getHours();
   const night = hour >= 20 || hour < 6;
@@ -372,13 +401,18 @@ export function createWorld(opts: { hour?: number } = {}): World {
   const rand = rng(Date.now() & 0xffff);
 
   const pets = new Map<string, PetState>();
+  const npcs = new Map<string, PetState>();
   const occ = new Map<number, string>();
+  const shots: Shot[] = [];
+  const fx: Fx[] = [];
   let focus: string | undefined;
   let held: string | null = null;
   let clock = 0;
+  let chaseTimer = 4;
   const MOVE_T = 0.7;
   const key = (tx: number, ty: number) => ty * COLS + tx;
   const free = (tx: number, ty: number) => tx >= 0 && ty >= 0 && tx < COLS && ty < ROWS && !terrain.blocked[key(tx, ty)] && !occ.has(key(tx, ty));
+  const everyone = () => [...pets.values(), ...npcs.values()];
 
   function spawnTile(mint: string): [number, number] {
     const start = hash(mint) % (COLS * ROWS);
@@ -389,6 +423,25 @@ export function createWorld(opts: { hour?: number } = {}): World {
       if (free(tx, ty)) return [tx, ty];
     }
     return [0, 0];
+  }
+
+  function makeState(p: WorldPet, kind: Kind): PetState {
+    const [tx, ty] = spawnTile(p.mint);
+    occ.set(key(tx, ty), p.mint);
+    return {
+      pet: p, kind, tx, ty, x: tx * TILE, y: ty * TILE, fromX: tx * TILE, fromY: ty * TILE, toTx: tx, toTy: ty, mt: 0,
+      dir: DIRS[hash(p.mint + 'd') % 4], state: 'idle', timer: rand() * 2, phase: rand() * 2, hopY: 0, hopV: 0, stun: 0, cool: 1 + rand() * 3,
+    };
+  }
+
+  // The background cast is always there, so even an empty city has some life in it.
+  for (let i = 0; i < 3; i++) {
+    const mint = `npc:cop${i}`;
+    npcs.set(mint, makeState({ mint, petId: 'npc-cop', look: COP, name: 'Officer', symbol: '' }, 'cop'));
+  }
+  for (let i = 0; i < 6; i++) {
+    const mint = `npc:civ${i}`;
+    npcs.set(mint, makeState({ mint, petId: `npc-civ${i % CIVS.length}`, look: CIVS[i % CIVS.length], name: 'Local', symbol: '' }, 'civ'));
   }
 
   function setPets(list: WorldPet[], focusMint?: string) {
@@ -407,23 +460,23 @@ export function createWorld(opts: { hour?: number } = {}): World {
         s.pet = p;
         continue;
       }
-      const [tx, ty] = spawnTile(p.mint);
-      occ.set(key(tx, ty), p.mint);
-      pets.set(p.mint, {
-        pet: p, tx, ty, x: tx * TILE, y: ty * TILE, fromX: tx * TILE, fromY: ty * TILE, toTx: tx, toTy: ty, mt: 0,
-        dir: DIRS[hash(p.mint + 'd') % 4], state: 'idle', timer: rand() * 2, phase: rand() * 2, hopY: 0, hopV: 0,
-      });
+      pets.set(p.mint, makeState(p, 'pet'));
     }
   }
 
   function chooseNext(s: PetState) {
-    if (rand() < 0.035) {
+    if (s.kind === 'pet' && rand() < 0.035) {
       s.state = 'sleep';
       s.timer = 4 + rand() * 4;
       return;
     }
-    // prefer to keep going the way it was facing
-    const order = [...DIRS].sort((a, b) => (b === s.dir ? 1.5 : 0) + rand() - ((a === s.dir ? 1.5 : 0) + rand()));
+    const target = s.chase ? pets.get(s.chase) : undefined;
+    const score = (d: Dir) => {
+      let v = (d === s.dir ? 1.5 : 0) + rand();
+      if (target) v += 4 - (Math.abs(s.tx + DV[d][0] - target.tx) + Math.abs(s.ty + DV[d][1] - target.ty)) * 0.5;
+      return v;
+    };
+    const order = [...DIRS].sort((a, b) => score(b) - score(a));
     for (const d of order) {
       const nx = s.tx + DV[d][0];
       const ny = s.ty + DV[d][1];
@@ -443,33 +496,111 @@ export function createWorld(opts: { hour?: number } = {}): World {
     s.timer = 0.8 + rand();
   }
 
+  function fire(s: PetState, t: PetState) {
+    const sx = s.x + 8;
+    const sy = s.y + 8;
+    const dx = t.x + 8 - sx;
+    const dy = t.y + 8 - sy;
+    const dist = Math.hypot(dx, dy) || 1;
+    if (s.state !== 'move') s.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
+    shots.push({ x: sx + (dx / dist) * 6, y: sy + (dy / dist) * 6, vx: (dx / dist) * SHOT_SPEED, vy: (dy / dist) * SHOT_SPEED, life: dist / SHOT_SPEED + 0.12, col: s.pet.look.accent, from: s.pet.mint });
+    fx.push({ x: sx, y: sy - 10, t: 0, kind: 'pow', text: POWS[Math.floor(rand() * POWS.length)], col: s.pet.look.accent });
+    s.cool = 2.2 + rand() * 3;
+  }
+
+  function nearestTarget(s: PetState): PetState | null {
+    let best: PetState | null = null;
+    let bd = RANGE;
+    for (const o of everyone()) {
+      if (o === s) continue;
+      if (s.kind === 'cop' && o.kind !== 'pet') continue; // cops only go after characters
+      const d = Math.hypot(o.x - s.x, o.y - s.y);
+      if (d < bd) {
+        bd = d;
+        best = o;
+      }
+    }
+    return best;
+  }
+
+  function step(s: PetState, dt: number) {
+    if (s.hopV !== 0 || s.hopY > 0) {
+      s.hopV -= 260 * dt;
+      s.hopY = Math.max(0, s.hopY + s.hopV * dt);
+      if (s.hopY === 0) s.hopV = 0;
+    }
+    if (s.stun > 0) s.stun = Math.max(0, s.stun - dt);
+    if (s.cool > 0) s.cool -= dt;
+    if (held === s.pet.mint) return;
+    if (s.state === 'move') {
+      s.mt += dt / MOVE_T;
+      if (s.mt >= 1) {
+        occ.delete(key(s.tx, s.ty));
+        s.tx = s.toTx;
+        s.ty = s.toTy;
+        s.x = s.tx * TILE;
+        s.y = s.ty * TILE;
+        s.state = 'idle';
+        s.timer = rand() < 0.65 ? 0 : 0.6 + rand() * 3;
+      } else {
+        s.x = s.fromX + (s.toTx * TILE - s.fromX) * s.mt;
+        s.y = s.fromY + (s.toTy * TILE - s.fromY) * s.mt;
+      }
+    } else if (s.stun <= 0) {
+      s.timer -= dt;
+      if (s.timer <= 0) chooseNext(s);
+    }
+    // blaster fight: everyone except the passers-by takes the odd shot at whoever is close
+    if (s.kind !== 'civ' && s.cool <= 0 && s.stun <= 0 && s.state !== 'sleep') {
+      const t = nearestTarget(s);
+      if (t && rand() < 0.7) fire(s, t);
+      else s.cool = 0.6 + rand();
+    }
+  }
+
   function update(dt: number) {
     clock += dt;
-    for (const s of pets.values()) {
-      if (s.hopV !== 0 || s.hopY > 0) {
-        s.hopV -= 260 * dt;
-        s.hopY = Math.max(0, s.hopY + s.hopV * dt);
-        if (s.hopY === 0) s.hopV = 0;
+    for (const s of everyone()) step(s, dt);
+
+    // cops pick someone to chase now and then
+    chaseTimer -= dt;
+    if (chaseTimer <= 0) {
+      chaseTimer = 6 + rand() * 8;
+      const list = [...pets.keys()];
+      for (const c of npcs.values()) if (c.kind === 'cop') c.chase = list.length && rand() < 0.8 ? list[Math.floor(rand() * list.length)] : undefined;
+    }
+
+    // blaster shots
+    for (let i = shots.length - 1; i >= 0; i--) {
+      const b = shots[i];
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.life -= dt;
+      const tx = Math.floor(b.x / TILE);
+      const ty = Math.floor(b.y / TILE);
+      let done = b.life <= 0 || b.x < 0 || b.y < 0 || b.x > W || b.y > H;
+      if (!done && tx >= 0 && ty >= 0 && tx < COLS && ty < ROWS && terrain.blocked[key(tx, ty)] && !occ.has(key(tx, ty))) {
+        fx.push({ x: b.x, y: b.y, t: 0, kind: 'spark', col: b.col });
+        done = true;
       }
-      if (held === s.pet.mint) continue;
-      if (s.state === 'move') {
-        s.mt += dt / MOVE_T;
-        if (s.mt >= 1) {
-          occ.delete(key(s.tx, s.ty));
-          s.tx = s.toTx;
-          s.ty = s.toTy;
-          s.x = s.tx * TILE;
-          s.y = s.ty * TILE;
-          s.state = 'idle';
-          s.timer = rand() < 0.65 ? 0 : 0.6 + rand() * 3;
-        } else {
-          s.x = s.fromX + (s.toTx * TILE - s.fromX) * s.mt;
-          s.y = s.fromY + (s.toTy * TILE - s.fromY) * s.mt;
+      if (!done) {
+        for (const e of everyone()) {
+          if (e.pet.mint === b.from) continue;
+          if (Math.abs(b.x - (e.x + 8)) < 7 && Math.abs(b.y - (e.y + 8)) < 7) {
+            e.stun = 1.3; // dazed for a moment, never hurt
+            e.hopV = 70;
+            if (e.state === 'sleep') e.state = 'idle';
+            fx.push({ x: e.x + 8, y: e.y - 2, t: 0, kind: 'spark', col: '#FFD23F' });
+            done = true;
+            break;
+          }
         }
-      } else {
-        s.timer -= dt;
-        if (s.timer <= 0) chooseNext(s);
       }
+      if (done) shots.splice(i, 1);
+    }
+    for (let i = fx.length - 1; i >= 0; i--) {
+      fx[i].t += dt;
+      if (fx[i].t > (fx[i].kind === 'pow' ? 0.7 : 0.35)) fx.splice(i, 1);
     }
   }
 
@@ -496,8 +627,8 @@ export function createWorld(opts: { hour?: number } = {}): World {
       if (Math.sin(clock * 2 + i * 1.3) > 0.1) g.fillRect(x, y, 4, 1);
     }
 
-    // pets, back to front
-    const list = [...pets.values()].sort((a, b) => a.y - b.y);
+    // everyone, back to front
+    const list = everyone().sort((a, b) => a.y - b.y);
     for (const s of list) {
       const sp = sprite(s);
       const bob = s.state === 'move' && Math.floor(s.mt * 4) % 2 === 1 ? -1 : 0;
@@ -521,6 +652,19 @@ export function createWorld(opts: { hour?: number } = {}): World {
         }
         g.globalAlpha = 1;
       }
+      if (s.stun > 0) {
+        // dazed: three little stars circle the head
+        g.fillStyle = '#FFE066';
+        for (let k = 0; k < 3; k++) {
+          const a = clock * 8 + (k * Math.PI * 2) / 3;
+          g.fillRect(Math.round(px + 9 + Math.cos(a) * 6), Math.round(py + 1 + Math.sin(a) * 2), 2, 2);
+        }
+      }
+      if (s.kind === 'cop' && s.chase) {
+        // siren on the cap while chasing
+        g.fillStyle = Math.floor(clock * 6) % 2 === 0 ? '#FF3355' : '#3D8BFF';
+        g.fillRect(px + 7, py + 4, 4, 3);
+      }
       if (s.hopY > 5) {
         g.fillStyle = '#FFD23F';
         const hx = px + 12;
@@ -531,7 +675,7 @@ export function createWorld(opts: { hour?: number } = {}): World {
         g.fillRect(hx + 1, hy + 3, 3, 1);
       }
       if (s.pet.mint === focus) {
-        // a bobbing arrow shows which pet belongs to this coin
+        // a bobbing arrow shows which character belongs to this coin
         const ay = py - 7 + Math.round(Math.sin(clock * 5) * 1.5);
         g.fillStyle = OUT;
         g.fillRect(px + 4, ay - 1, 10, 2);
@@ -545,6 +689,40 @@ export function createWorld(opts: { hour?: number } = {}): World {
         g.fillRect(px + 8, ay + 3, 2, 1);
       }
     }
+
+    // blaster pellets with a short trail
+    for (const b of shots) {
+      g.fillStyle = b.col;
+      g.fillRect(Math.round(b.x) - 1, Math.round(b.y) - 1, 3, 3);
+      g.globalAlpha = 0.45;
+      g.fillRect(Math.round(b.x - b.vx * 0.03) - 1, Math.round(b.y - b.vy * 0.03) - 1, 2, 2);
+      g.globalAlpha = 1;
+    }
+    // comic sound effects and sparks
+    g.font = 'bold 8px "JetBrains Mono", monospace';
+    g.textAlign = 'center';
+    for (const f of fx) {
+      if (f.kind === 'pow' && f.text) {
+        const rise = f.t * 14;
+        g.globalAlpha = Math.max(0, 1 - f.t / 0.7);
+        g.lineWidth = 3;
+        g.strokeStyle = OUT;
+        g.strokeText(f.text, Math.round(f.x), Math.round(f.y - rise));
+        g.fillStyle = f.col;
+        g.fillText(f.text, Math.round(f.x), Math.round(f.y - rise));
+        g.globalAlpha = 1;
+      } else {
+        const r = 2 + f.t * 16;
+        g.globalAlpha = Math.max(0, 1 - f.t / 0.35);
+        g.fillStyle = f.col;
+        g.fillRect(Math.round(f.x - r), Math.round(f.y), 2, 2);
+        g.fillRect(Math.round(f.x + r), Math.round(f.y), 2, 2);
+        g.fillRect(Math.round(f.x), Math.round(f.y - r), 2, 2);
+        g.fillRect(Math.round(f.x), Math.round(f.y + r), 2, 2);
+        g.globalAlpha = 1;
+      }
+    }
+    g.textAlign = 'start';
 
     // evening and night: the neon city never fully goes dark, its signs and lamps glow
     if (night || dusk) {

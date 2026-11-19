@@ -204,7 +204,7 @@ export default function PetPark({ coin, line }: { coin?: Coin; line?: string }) 
         )}
       </div>
       <p className="muted small park-foot">
-        Tap a character for a hop and its latest caper line. Name tags show each character's coin and open its page. All characters are AI and fictional.{pet ? ` The arrow marks ${pet.name}.` : ''}
+        Tap a character for a hop and its latest caper line. Name tags show each character's coin and open its page. The crews trade harmless toy-blaster fire with each other and with the cartoon cops: zaps only, nobody gets hurt, they just see stars. All characters are AI and fictional.{pet ? ` The arrow marks ${pet.name}.` : ''}
         {reduce ? ' Motion is paused because your device asks for less movement. Press Play to start it.' : ''}
       </p>
     </section>
