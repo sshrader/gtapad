@@ -19,6 +19,8 @@ const PORT = Number(process.env.PORT || 8787);
 const RPC_URL = process.env.SOLANA_RPC_URL || clusterApiUrl('devnet');
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const PINATA_JWT = process.env.PINATA_JWT || '';
+// STORAGE=local keeps images and metadata on this server's volume (DATA_DIR/uploads) even if a Pinata key is set.
+const USE_PINATA = Boolean(PINATA_JWT) && process.env.STORAGE !== 'local';
 const IPFS_GATEWAY = (process.env.IPFS_GATEWAY || 'https://ipfs.io').replace(/\/$/, '');
 // Uploaded images live next to the JSON store so they sit on the same persistent volume (DATA_DIR).
 const UPLOAD_DIR = path.resolve(process.env.DATA_DIR || 'server/data', 'uploads');
@@ -108,7 +110,7 @@ async function saveLocal(buffer, filename) {
 /* ------------------------------ routes ------------------------------ */
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, rpc: RPC_HOST, storage: PINATA_JWT ? 'pinata' : 'local', llm: { ...llmInfo(), callsToday: budgetUsed() } });
+  res.json({ ok: true, rpc: RPC_HOST, storage: USE_PINATA ? 'pinata' : 'local', llm: { ...llmInfo(), callsToday: budgetUsed() } });
 });
 
 // Step 1 of creating a coin: store the image and the metadata JSON, return the metadata link
@@ -152,7 +154,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
         properties: { files: [{ uri: image, type: req.file.mimetype }], category: 'image' },
       });
 
-    if (PINATA_JWT) {
+    if (USE_PINATA) {
       imageUrl = await pinFile(req.file.buffer, `${id}.${ext}`, req.file.mimetype);
       metadataUri = await pinFile(Buffer.from(metadataFor(imageUrl)), `${id}.json`, 'application/json');
     } else {
@@ -163,7 +165,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
     const record = { id, creator: creatorKey, name, symbol, description, ...links, imageUrl, metadataUri, createdAt: Date.now() };
     await store.update('uploads.json', {}, (all) => ({ ...all, [id]: record }));
-    res.json({ uploadId: id, metadataUri, imageUrl, storage: PINATA_JWT ? 'pinata' : 'local' });
+    res.json({ uploadId: id, metadataUri, imageUrl, storage: USE_PINATA ? 'pinata' : 'local' });
   } catch (e) {
     console.error('upload failed', e);
     bad(res, e.message || 'Upload failed.', 500);
@@ -356,7 +358,7 @@ const network = await checkNetwork(connection).catch((e) => {
 app.listen(PORT, () => {
   console.log(`Network: ${network}${launchesRestricted() ? ' (launches limited to the allowlist)' : ''}`);
   const llm = llmInfo();
-  console.log(`Mobpad API on http://localhost:${PORT}  (rpc: ${RPC_HOST}, storage: ${PINATA_JWT ? 'pinata' : 'local'})`);
+  console.log(`Mobpad API on http://localhost:${PORT}  (rpc: ${RPC_HOST}, storage: ${USE_PINATA ? 'pinata' : 'local'})`);
   console.log(llm.enabled ? `Cats: AI on (${llm.model} via ${llm.host})` : 'Cats: canned lines only. Add LLM_API_KEY to .env to turn the AI on.');
   startScheduler();
 });
